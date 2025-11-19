@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "SelfCapture",
+    "slug": "selfcapture",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "jsEngine": "hermes",
+    "newArchEnabled": true,
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "Fotoğraf çekimi için kamera erişimi gerekir.",
+          "enableMicrophonePermission": false
+        }
+      ],
+      "expo-asset"
+    ],
+    "android": {
+      "minSdkVersion": 26,
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
+      "package": "com.loresima53.selfcapture",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "ios": {
+      "supportsTablet": true
+    }
+  }
+}
