@@ -2,15 +2,17 @@ import React, {
   createContext,
   ReactNode,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { CAPTURE_STEPS, CaptureStep } from '../config/steps';
+import { CAPTURE_RULES, CaptureRule } from '../config/captureRules';
 import { useAuth } from './AuthProvider';
 
 type CaptureContextValue = {
-  steps: CaptureStep[];
+  steps: CaptureRule[];
   currentIndex: number;
   setCurrentIndex: (index: number) => void;
   photos: Record<string, string | null>;
@@ -30,12 +32,48 @@ export const CaptureProvider = ({ children }: { children: ReactNode }) => {
   const { token } = useAuth();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const steps = CAPTURE_RULES;
   const [photos, setPhotos] = useState<Record<string, string | null>>(() =>
-    CAPTURE_STEPS.reduce<Record<string, string | null>>((acc, step) => {
+    steps.reduce<Record<string, string | null>>((acc, step) => {
       acc[step.id] = null;
       return acc;
     }, {}),
   );
+
+  // İlk açılışta kaydedilmiş ilerlemeyi yükle
+  useEffect(() => {
+    const loadProgress = async () => {
+      try {
+        const savedIndex = await AsyncStorage.getItem('captureProgress');
+        if (savedIndex !== null) {
+          const index = parseInt(savedIndex, 10);
+          // Sadece geçerli bir index ise yükle (0-4 arası)
+          if (index >= 0 && index < steps.length) {
+            setCurrentIndex(index);
+          }
+        }
+      } catch (error) {
+        console.error('Progress yükleme hatası:', error);
+      } finally {
+        setIsLoaded(true);
+      }
+    };
+    loadProgress();
+  }, []);
+
+  // İlerleme değiştiğinde kaydet (en az 1 fotoğraf çekildiyse)
+  useEffect(() => {
+    if (isLoaded) {
+      const hasAnyPhoto = Object.values(photos).some(photo => photo !== null);
+      if (hasAnyPhoto) {
+        AsyncStorage.setItem('captureProgress', currentIndex.toString());
+      } else {
+        // Hiç fotoğraf yoksa progress'i temizle
+        AsyncStorage.removeItem('captureProgress');
+      }
+    }
+  }, [currentIndex, isLoaded, photos]);
 
   const savePhoto = async (stepId: string, uri: string) => {
     // Local state update
@@ -72,7 +110,7 @@ export const CaptureProvider = ({ children }: { children: ReactNode }) => {
   const deletePhoto = (stepId: string) => {
     setPhotos((prev) => ({ ...prev, [stepId]: null }));
     // Silinen fotoğrafın index'ini bul ve o adıma geri dön
-    const stepIndex = CAPTURE_STEPS.findIndex((step) => step.id === stepId);
+    const stepIndex = steps.findIndex((step) => step.id === stepId);
     if (stepIndex !== -1) {
       setCurrentIndex(stepIndex);
     }
@@ -86,20 +124,21 @@ export const CaptureProvider = ({ children }: { children: ReactNode }) => {
     setIsPaused(false);
   };
 
-  const reset = () => {
+  const reset = async () => {
     setCurrentIndex(0);
     setIsPaused(false);
     setPhotos(
-      CAPTURE_STEPS.reduce<Record<string, string | null>>((acc, step) => {
+      steps.reduce<Record<string, string | null>>((acc, step) => {
         acc[step.id] = null;
         return acc;
       }, {}),
     );
+    await AsyncStorage.removeItem('captureProgress');
   };
 
   const value = useMemo(
     () => ({
-      steps: CAPTURE_STEPS,
+      steps,
       currentIndex,
       setCurrentIndex,
       photos,

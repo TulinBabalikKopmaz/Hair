@@ -1,4 +1,16 @@
+/**
+ * CaptureFlowScreen
+ *
+ * Fotoğraf çekim adımlarının ana ekranı. Tüm kural, guidance, overlay ve kamera mantığı burada toplanır.
+ *
+ * - Adım bazlı kural kontrolü, sesli/yazılı yönlendirme, otomatik çekim, overlay ve rehber kutuları içerir.
+ * - Dosya çok uzun ve karmaşık, mantıksal bloklar ayrı hook/component olarak bölünebilir.
+ * - Fazla state, useEffect ve inline fonksiyonlar sadeleştirilmeli.
+ */
+// Sesli yönlendirme için custom hook
+import { CAPTURE_RULES } from '../config/captureRules';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import StepRuleBox from '../components/StepRuleBox';
 import {
   ActivityIndicator,
   Image,
@@ -8,6 +20,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Camera, useCameraDevice, useFrameProcessor } from 'react-native-vision-camera';
 import { Worklets } from 'react-native-worklets-core';
@@ -17,9 +30,11 @@ import { Audio } from 'expo-av';
 import { RootStackParamList } from '../../App';
 import { useCapture } from '../providers/CaptureProvider';
 import CameraOverlay from '../components/CameraOverlay';
-import AngleIndicator from '../components/AngleIndicator';
+// ...existing code...
+import FaceLandmarks from '../components/FaceLandmarks';
 import { useDeviceAngle } from '../hooks/useDeviceAngle';
 import { useCaptureConditions, FaceData } from '../hooks/useCaptureConditions';
+import { getRuleById, checkRules } from '../config/captureRules';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CaptureFlow'>;
 
@@ -34,89 +49,83 @@ const STEP_POSE_REQUIREMENTS: Record<string, PoseType> = {
   donor: 'donor',
 };
 
-const FACE_ANALYSIS_CONFIG: Record<
-  string,
-  { expected: Orientation[]; failureHint: string }
-> = {
-  front: {
-    expected: ['front'],
-    failureHint: 'Yüzünü kameraya tam çevir ve telefonu dik konumda tut.',
-  },
-  right45: {
-    expected: ['right'],
-    failureHint: 'Başını biraz daha sağa çevir.',
-  },
-  left45: {
-    expected: ['left'],
-    failureHint: 'Başını biraz daha sola çevir.',
-  },
-};
 
-const FACE_YAW_REQUIREMENTS: Record<
-  string,
-  { min?: number; max?: number; description: string }
-> = {
-  front: { min: -8, max: 8, description: 'Yüzünü tam karşıya çevir.' },
-  right45: { min: 20, description: 'Başını yeterince sağa çevir.' },
-  left45: { max: -20, description: 'Başını yeterince sola çevir.' },
-};
 
 const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
-  const { steps, currentIndex, setCurrentIndex, photos, savePhoto, isPaused, pause, resume } = useCapture();
+  const isFocused = useIsFocused();
+  // Son oynatılan sesli uyarı
+  const [lastSpokenHint, setLastSpokenHint] = useState<string | null>(null);
+  // Capture context
+  // Adım bilgileri doğrudan captureRules içinden alınacak
+  // CAPTURE_RULES importu dosyanın en üstünde zaten var, tekrarını kaldırıyoruz
+  const { currentIndex, setCurrentIndex, photos, savePhoto, isPaused, pause, resume } = useCapture();
+  const steps = CAPTURE_RULES;
   const currentStep = steps[currentIndex];
   const deviceAngle = useDeviceAngle();
   const { pitch, roll, yaw, zAxis, isStable, stabilityDuration } = deviceAngle;
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  // Face yaw map state
+  const [faceYawMap, setFaceYawMap] = useState<Record<string, number | null>>(() =>
+    CAPTURE_RULES.reduce<Record<string, number | null>>((acc, step) => {
+      acc[step.id] = null;
+      return acc;
+    }, {}),
+  );
 
-  // VisionCamera setup
+  // Analysis status state
+  const [analysisStatus, setAnalysisStatus] = useState<{ text: string; tone: StatusTone } | null>(null);
+  // Camera devices
   const front = useCameraDevice("front");
   const back = useCameraDevice("back");
 
+  // Camera ref
+  const cameraRef = useRef<Camera | null>(null);
+
+  // Countdown timer refs
+  const countdownTimer = useRef<NodeJS.Timeout | null>(null);
+  const photoTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Tick sound ref
+  const tickSound = useRef<Audio.Sound | null>(null);
+
+  // Permission state
   const [permission, setPermission] = useState(false);
-  const [isCameraReady, setIsCameraReady] = useState(false);
+
+  // Countdown state
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [isTakingPhoto, setIsTakingPhoto] = useState(false);
+
+  // Face landmarks state
+  const [faceLandmarks, setFaceLandmarks] = useState<any>(null);
+
+  // Frame dimensions state
+  const [frameDimensions, setFrameDimensions] = useState({ width: 640, height: 480 });
+
+  // Face detector hooks
+  const { detectFaces, stopListeners } = useFaceDetector({
+    performanceMode: "fast",
+    landmarkMode: "all",
+    contourMode: "none",
+    classificationMode: "none",
+  });
+  // ... diğer değişkenler
+
+  // ...existing code...
+  // ...existing code...
+  // ...existing code...
+  // ruleCheckResult tanımlandıktan SONRA sesli yönlendirme hook'u çağrılır
+  // ...existing code...
 
   // Face detection state
   const [faceYaw, setFaceYaw] = useState(0);
   const [facePitch, setFacePitch] = useState(0);
   const [faceRoll, setFaceRoll] = useState(0);
   const [faceDetected, setFaceDetected] = useState(false);
-  const [faceBounds, setFaceBounds] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
-
-  const [faceYawMap, setFaceYawMap] = useState<Record<string, number | null>>(() =>
-    steps.reduce<Record<string, number | null>>((acc, step) => {
-      acc[step.id] = null;
-      return acc;
-    }, {}),
-  );
-
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const [isTakingPhoto, setIsTakingPhoto] = useState(false);
-  const cameraRef = useRef<Camera | null>(null);
-  const countdownTimer = useRef<NodeJS.Timeout | null>(null);
-  const photoTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const tickSound = useRef<Audio.Sound | null>(null);
-  const [analysisStatus, setAnalysisStatus] = useState<{
-    text: string;
-    tone: StatusTone;
-  } | null>(null);
-
-  // Face detector
-  const { detectFaces, stopListeners } = useFaceDetector({
-    performanceMode: "fast",
-    landmarkMode: "none",
-    contourMode: "none",
-    classificationMode: "none",
-  });
-
-  const YAW_THRESHOLD = 15;
-
-  // Yüzün kılavuz oval içinde olup olmadığını kontrol et
-  // CameraOverlay'deki detaylı kontrol kullanılacak
+  const [faceBounds, setFaceBounds] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [isFaceInGuide, setIsFaceInGuide] = useState(false);
+  const [faceAreaPercent, setFaceAreaPercent] = useState(0);
+
+
 
   // Yüz verilerini hazırla
   const faceData: FaceData = useMemo(
@@ -132,11 +141,34 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   // Koşul kontrol mekanizması - yeni hook kullanılıyor
+  // Adım kuralı
+  const currentRule = useMemo(() => getRuleById(currentStep.id), [currentStep.id]);
+  // Artık step objesi CaptureRule tipinde, tip uyumsuzluğu yok
   const captureConditions = useCaptureConditions(currentStep, deviceAngle, faceData);
 
-  // Koşul kontrol mekanizmasından gelen değerleri kullan
-  const angleReady = captureConditions.deviceAngleOk;
-  const angleHint = captureConditions.primaryHint;
+  // Yeni kural kontrol sistemi
+  const ruleCheckResult = useMemo(() => {
+    if (!currentRule) return null;
+    return checkRules(
+      currentRule,
+      {
+        roll: deviceAngle.roll,
+        pitch: deviceAngle.pitch,
+        zAxis: deviceAngle.zAxis,
+        isStable: deviceAngle.isStable,
+        stabilityDuration: deviceAngle.stabilityDuration,
+      },
+      {
+        detected: faceDetected,
+        yaw: faceYaw,
+        pitch: facePitch,
+        bounds: faceBounds,
+      },
+      faceAreaPercent,
+    );
+  }, [currentRule, deviceAngle, faceDetected, faceYaw, facePitch, faceBounds, faceAreaPercent]);
+  const angleReady = ruleCheckResult?.allRulesMet || captureConditions.deviceAngleOk;
+  const angleHint = ruleCheckResult?.currentHint || captureConditions.primaryHint;
 
   const facingMode =
     currentStep.id === 'front' ||
@@ -174,14 +206,21 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
   }, []);
 
   // Frame processor for real-time face detection
-  const handleFacesJS = Worklets.createRunOnJS((faces: Face[]) => {
+  const handleFacesJS = Worklets.createRunOnJS((faces: Face[], frameWidth: number, frameHeight: number) => {
     if (faces.length === 0) {
       setFaceDetected(false);
       setFaceBounds(null);
+      setFaceLandmarks(null);
       return;
     }
 
     const face = faces[0];
+    setFrameDimensions((prev) => {
+      if (prev.width === frameWidth && prev.height === frameHeight) {
+        return prev;
+      }
+      return { width: frameWidth, height: frameHeight };
+    });
     setFaceDetected(true);
     setFaceYaw(face.yawAngle);
     setFacePitch(face.pitchAngle);
@@ -192,12 +231,20 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
       width: face.bounds.width,
       height: face.bounds.height,
     });
+
+    // Landmarkları kaydet
+    if (face.landmarks) {
+      setFaceLandmarks(face.landmarks);
+      console.log('👁️ Landmarks detected:', Object.keys(face.landmarks));
+    } else {
+      console.log('❌ No landmarks in face data');
+    }
   });
 
   const frameProcessor = useFrameProcessor((frame) => {
     "worklet";
     const faces = detectFaces(frame);
-    handleFacesJS(faces);
+    handleFacesJS(faces, frame.width, frame.height);
   }, []);
 
   const playTick = useCallback(async () => {
@@ -219,18 +266,17 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
       console.log('📸 Photo blocked: No camera ref');
       return;
     }
-    
+
     if (isTakingPhoto) {
       console.log('📸 Photo blocked: Already taking photo');
       return;
     }
-    
+
     console.log('📸 Taking photo now...');
     setIsTakingPhoto(true);
-    
+
     try {
       const photo = await cameraRef.current.takePhoto({
-        qualityPrioritization: 'balanced',
         flash: 'off',
       });
 
@@ -252,12 +298,12 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
 
       await savePhoto(currentStep.id, photoUri);
       console.log('✅ Photo saved, moving to next step');
-      
+
       // Fotoğraf kaydedildikten sonra kısa bir gecikme ekle
       await new Promise(resolve => setTimeout(resolve, 300));
 
       if (currentIndex === steps.length - 1) {
-        navigation.navigate('Summary');
+        // navigation to summary removed
       } else {
         setCurrentIndex(currentIndex + 1);
       }
@@ -320,79 +366,44 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
     }, 1000);
   }, [playTick, takePhoto, isTakingPhoto, isCameraReady]);
 
+  // Otomatik geri sayım - Tüm kurallar sağlandığında başlar
   useEffect(() => {
-    // Pause durumunda otomatik çekim yapma
-    if (isPaused) {
-      if (photoTimerRef.current) {
-        clearTimeout(photoTimerRef.current);
-        photoTimerRef.current = null;
-      }
+    // Zaten fotoğraf çekilmişse veya sayım başlamışsa atla
+    if (photos[currentStep.id] || countdown !== null || isTakingPhoto) {
       return;
     }
 
-    // Debug: Koşulları logla (her zaman)
-    console.log('🔍 Capture Conditions:', {
-      allConditionsMet: captureConditions.allConditionsMet,
-      deviceAngleOk: captureConditions.deviceAngleOk,
-      faceDetected: captureConditions.faceDetected,
-      faceInGuide: captureConditions.faceInGuide,
-      faceOrientationOk: captureConditions.faceOrientationOk,
-      stabilityOk: captureConditions.stabilityOk,
-      isTakingPhoto,
-      permission,
+    // Kural kontrolü sonucu yoksa atla
+    if (!ruleCheckResult) {
+      console.log('❌ No rule check result');
+      return;
+    }
+
+    // Debug: Kural durumunu logla
+    console.log(`🔍 Rule check for ${currentStep.id}:`, {
+      allRulesMet: ruleCheckResult.allRulesMet,
+      deviceAngleOk: ruleCheckResult.deviceAngleOk,
+      faceDetectionOk: ruleCheckResult.faceDetectionOk,
+      faceAreaOk: ruleCheckResult.faceAreaOk,
+      faceOrientationOk: ruleCheckResult.faceOrientationOk,
+      stabilityOk: ruleCheckResult.stabilityOk,
       isCameraReady,
-      hasPhoto: !!photos[currentStep.id],
-      stepId: currentStep.id,
-      hints: captureConditions.hints,
+      failedRules: ruleCheckResult.failedRules,
     });
 
-    // Koşullar sağlandığında direkt fotoğraf çek
-    // Tüm koşulları kontrol et
-    const canTakePhoto = 
-      captureConditions.allConditionsMet &&
-      !isTakingPhoto &&
-      permission &&
-      isCameraReady &&
-      !photos[currentStep.id] && // Fotoğraf henüz çekilmemişse
-      !photoTimerRef.current; // Timer zaten başlamamışsa
-    
-    if (canTakePhoto) {
-      console.log('✅ All conditions met - taking photo in 500ms!', {
-        allConditionsMet: captureConditions.allConditionsMet,
-        deviceAngleOk: captureConditions.deviceAngleOk,
-        faceDetected: captureConditions.faceDetected,
-        faceInGuide: captureConditions.faceInGuide,
-        faceOrientationOk: captureConditions.faceOrientationOk,
-        stabilityOk: captureConditions.stabilityOk,
-        stepId: currentStep.id,
-      });
-      // Kısa bir gecikme ile direkt fotoğraf çek (kullanıcı hazır olsun)
-      photoTimerRef.current = setTimeout(() => {
-        photoTimerRef.current = null;
-        takePhoto();
-      }, 500);
-      return;
-    } else {
-      // Koşullar sağlanmadı - timer'ı iptal et
-      if (photoTimerRef.current) {
-        clearTimeout(photoTimerRef.current);
-        photoTimerRef.current = null;
-      }
+    // Tüm kurallar sağlanıyorsa otomatik sayıcı başlat
+    if (ruleCheckResult.allRulesMet && isCameraReady) {
+      console.log(`✅ ${currentStep.id}: All rules met, starting auto countdown...`);
+      startCountdown();
     }
   }, [
-    captureConditions.allConditionsMet,
-    captureConditions.deviceAngleOk,
-    captureConditions.faceDetected,
-    captureConditions.faceInGuide,
-    captureConditions.faceOrientationOk,
-    captureConditions.stabilityOk,
-    takePhoto,
-    isTakingPhoto,
-    permission,
-    isCameraReady,
-    photos,
     currentStep.id,
-    isPaused,
+    ruleCheckResult?.allRulesMet,
+    photos,
+    countdown,
+    isTakingPhoto,
+    isCameraReady,
+    startCountdown,
   ]);
 
   useEffect(() => {
@@ -403,19 +414,7 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
     setAnalysisStatus(null);
   }, [currentStep.id]);
 
-  const shouldAnalyzeFace = useMemo(
-    () => Boolean(FACE_ANALYSIS_CONFIG[currentStep.id]),
-    [currentStep.id],
-  );
-
-  const expectedOrientationMatch = useCallback((stepId: string, orientation: string) => {
-    const cfg = FACE_ANALYSIS_CONFIG[stepId];
-    if (!cfg) {
-      return true;
-    }
-    return cfg.expected.includes(orientation);
-  }, []);
-
+  // ...existing code...
   const goNext = () => {
     // Fotoğraf çekilmeden ileri gidilemez
     if (!photos[currentStep.id]) {
@@ -423,7 +422,7 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
     }
 
     if (currentIndex === steps.length - 1) {
-      navigation.navigate('Summary');
+      // navigation to summary removed
       return;
     }
     setCurrentIndex(currentIndex + 1);
@@ -470,7 +469,7 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.progressText}>
           Adım {currentIndex + 1} / {steps.length}
         </Text>
-        <Text style={styles.stepTitle}>{currentStep.title}</Text>
+        <Text style={styles.stepTitle}>{currentStep.name}</Text>
       </View>
 
       <View style={styles.cameraShell}>
@@ -494,8 +493,6 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
           />
         )}
         <CameraOverlay
-          title={currentStep.title}
-          description={currentStep.description}
           countdown={countdown}
           hint={angleHint}
           angleReady={captureConditions.allConditionsMet}
@@ -504,136 +501,56 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
           faceYaw={faceYaw}
           facePitch={facePitch}
           onFaceInGuideChange={setIsFaceInGuide}
-        />
+          onFaceAreaChange={setFaceAreaPercent}
+          deviceAngle={deviceAngle}
+          frameSize={frameDimensions}
+          mirrorHorizontal={facingMode === 'front'}
+          landmarkOffsets={currentStep.landmarkOffsets}
+        >
+          <FaceLandmarks
+            landmarks={faceLandmarks}
+            overlaySize={frameDimensions}
+            frameSize={frameDimensions}
+            landmarkOffsets={currentStep.landmarkOffsets}
+          />
+        </CameraOverlay>
       </View>
 
-      <AngleIndicator
-        angleReady={captureConditions.deviceAngleOk}
-        isStable={captureConditions.stabilityOk}
-        hint={angleHint}
-      />
-
-      {/* Koşul durumları - AngleIndicator'ın altında */}
-      <View style={styles.conditionsPanel}>
-        <View style={styles.conditionsRow}>
-          <View style={styles.conditionItem}>
-            <Text style={[styles.conditionLabel, captureConditions.deviceAngleOk && styles.conditionOk]}>
-              📱 Telefon: {captureConditions.deviceAngleOk ? '✅' : '❌'}
-            </Text>
-          </View>
-          {(currentStep.id === 'front' || currentStep.id === 'right45' || currentStep.id === 'left45') && (
-            <>
-              <View style={styles.conditionItem}>
-                <Text style={[styles.conditionLabel, captureConditions.faceDetected && styles.conditionOk]}>
-                  👤 Yüz: {captureConditions.faceDetected ? '✅' : '❌'}
-                </Text>
-              </View>
-              <View style={styles.conditionItem}>
-                <Text style={[styles.conditionLabel, captureConditions.faceInGuide && styles.conditionOk]}>
-                  🎯 Kılavuz: {captureConditions.faceInGuide ? '✅' : '❌'}
-                </Text>
-              </View>
-              <View style={styles.conditionItem}>
-                <Text style={[styles.conditionLabel, captureConditions.faceOrientationOk && styles.conditionOk]}>
-                  🔄 Yön: {captureConditions.faceOrientationOk ? '✅' : '❌'}
-                </Text>
-              </View>
-            </>
-          )}
-          {(currentStep.id === 'vertex' || currentStep.id === 'donor') && (
-            <View style={styles.conditionItem}>
-              <Text style={[styles.conditionLabel, captureConditions.stabilityOk && styles.conditionOk]}>
-                🔒 Sabit: {captureConditions.stabilityOk ? '✅' : '❌'}
-              </Text>
-            </View>
-          )}
-        </View>
-        {captureConditions.hints.length > 0 && (
-          <View style={styles.conditionsHints}>
-            <Text style={styles.conditionsHintText}>
-              {captureConditions.hints[0]}
-            </Text>
-          </View>
-        )}
+      {/* KURAL KUTUSU KAMERANIN ALTINDA */}
+      <View style={{ marginTop: -20 }}>
+        <StepRuleBox rule={''} />
       </View>
 
-      <View style={styles.previewRow}>
-        {photos[currentStep.id] ? (
-          <Image source={{ uri: photos[currentStep.id] || undefined }} style={styles.previewImage} />
-        ) : (
-          <View style={styles.previewPlaceholder}>
-            <Text style={styles.previewPlaceholderText}>Fotoğraf bekleniyor</Text>
-          </View>
-        )}
-        <View style={styles.previewInfo}>
-          <Text style={styles.previewLabel}>Son durum</Text>
-          <Text style={styles.previewStatus}>
-            {photos[currentStep.id] ? 'Kaydedildi' : 'Hazır değil'}
-          </Text>
-          {FACE_YAW_REQUIREMENTS[currentStep.id] ? (
-            <>
-              <Text style={[styles.previewLabel, styles.previewLabelSpacer]}>Yüz yaw</Text>
-              <Text style={styles.previewStatus}>
-                {faceYawMap[currentStep.id] !== null && faceYawMap[currentStep.id] !== undefined
-                  ? `${faceYawMap[currentStep.id]?.toFixed(1)}°`
-                  : 'Bekleniyor'}
-              </Text>
-            </>
-          ) : null}
-          <Text style={[styles.previewLabel, styles.previewLabelSpacer]}>Yüz analizi</Text>
-          <Text
-            style={[
-              styles.previewStatus,
-              analysisStatus?.tone === 'success' && styles.previewStatusSuccess,
-              analysisStatus?.tone === 'warning' && styles.previewStatusWarning,
-              analysisStatus?.tone === 'error' && styles.previewStatusError,
-            ]}
-          >
-            {analysisStatus
-              ? analysisStatus.text
-              : shouldAnalyzeFace
-                ? 'Analiz bekleniyor'
-                : 'Bu adımda yüz analizi gerekmiyor'}
-          </Text>
-        </View>
-      </View>
-
+      {/* BUTONLAR KURALIN ALTINDA */}
       <View style={styles.controls}>
-        <TouchableOpacity
-          style={[styles.controlButton, styles.secondary]}
-          onPress={() => navigation.navigate('Gallery')}
-        >
-          <Text style={[styles.controlText, styles.secondaryText]}>📷 Galeri</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.controlButton, styles.secondary]}
-          onPress={isPaused ? resume : pause}
-        >
-          <Text style={[styles.controlText, styles.secondaryText]}>
-            {isPaused ? '▶️ Devam' : '⏸️ Duraklat'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.controlButton, !photos[currentStep.id] && styles.controlButtonDisabled]}
-          onPress={goNext}
-          disabled={!photos[currentStep.id]}
-        >
-          <Text style={[styles.controlText, !photos[currentStep.id] && styles.controlTextDisabled]}>
-            {currentIndex === steps.length - 1 ? 'Özete git' : 'İleri'}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.controlRow}>
+          <TouchableOpacity
+            style={[styles.controlButton, styles.secondary]}
+            onPress={() => navigation.navigate('Gallery')}
+          >
+            <Text style={[styles.controlText, styles.secondaryText]}>📷 Galeri</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.controlButton}
+            onPress={goNext}
+          >
+            <Text style={styles.controlText}>Sonra Çek</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      // ...existing code...
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flex: 3,
     backgroundColor: '#030712',
     padding: 16,
     gap: 16,
-    paddingBottom: 16,
+    paddingBottom: 24,
   },
   progress: {
     alignItems: 'center',
@@ -651,12 +568,13 @@ const styles = StyleSheet.create({
   },
   cameraShell: {
     flex: 1,
-    minHeight: 400,
+    maxHeight: 450,
     borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(148,163,184,0.3)',
     backgroundColor: '#000',
+    marginTop: -20, // Kamera kutucuğunu azıcık yukarı kaydır
   },
   camera: {
     flex: 1,
@@ -664,18 +582,51 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   controls: {
+    flexDirection: 'column',
+    gap: 12,
+    marginTop: -10,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  captureButton: {
+    backgroundColor: '#4ade80',
+    paddingVertical: 18,
+    paddingHorizontal: 32,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 60,
+    shadowColor: '#4ade80',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  captureButtonDisabled: {
+    backgroundColor: '#475569',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  captureButtonText: {
+    color: '#0f172a',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  captureButtonTextDisabled: {
+    color: '#94a3b8',
+  },
+  controlRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 8,
+    gap: 10,
   },
   controlButton: {
     flex: 1,
-    backgroundColor: '#38bdf8',
+    backgroundColor: '#0284c7',
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
-    minWidth: 80,
+    minWidth: 120,
   },
   controlButtonDisabled: {
     backgroundColor: '#475569',
@@ -841,8 +792,8 @@ const styles = StyleSheet.create({
   conditionsPanel: {
     backgroundColor: 'rgba(15, 23, 42, 0.85)',
     borderRadius: 8,
-    padding: 10,
-    marginTop: 8,
+    padding: 1,
+    marginTop: 1,
     marginHorizontal: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',

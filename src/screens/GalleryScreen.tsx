@@ -1,3 +1,11 @@
+/**
+ * GalleryScreen
+ *
+ * Kullanıcının çektiği fotoğrafları adım adım galeri şeklinde gösterir.
+ *
+ * - Fotoğraf silme, adım geçişi ve galeri navigasyonu içerir.
+ * - Alert ve FlatList dışında fazla karmaşık mantık yok, sade tutulabilir.
+ */
 import React from 'react';
 import {
   Alert,
@@ -20,10 +28,10 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Gallery'>;
 const GalleryScreen: React.FC<Props> = ({ navigation }) => {
   const { steps, photos, deletePhoto, setCurrentIndex } = useCapture();
 
-  const handleDelete = (stepId: string, stepTitle: string) => {
+  const handleDelete = (stepId: string, stepName: string) => {
     Alert.alert(
       'Fotoğrafı Sil',
-      `${stepTitle} fotoğrafını silmek istediğinizden emin misiniz? Bu fotoğraf yeniden çekilecek.`,
+      `${stepName} fotoğrafını silmek istediğinizden emin misiniz? Bu fotoğraf yeniden çekilecek.`,
       [
         {
           text: 'İptal',
@@ -78,12 +86,12 @@ const GalleryScreen: React.FC<Props> = ({ navigation }) => {
                 </View>
               )}
               <View style={styles.cardInfo}>
-                <Text style={styles.cardTitle}>{step.title}</Text>
+                <Text style={styles.cardTitle}>{step.name}</Text>
                 <Text style={styles.cardDesc}>{step.description}</Text>
                 {photo ? (
                   <TouchableOpacity
                     style={styles.deleteButton}
-                    onPress={() => handleDelete(step.id, step.title)}
+                    onPress={() => handleDelete(step.id, step.name)}
                   >
                     <Text style={styles.deleteButtonText}>🗑️ Sil</Text>
                   </TouchableOpacity>

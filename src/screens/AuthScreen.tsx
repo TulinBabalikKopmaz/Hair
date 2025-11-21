@@ -1,3 +1,11 @@
+/**
+ * AuthScreen
+ *
+ * Kullanıcıya kayıt olma ve giriş yapma ekranı sunar.
+ *
+ * - Form doğrulama, input yönetimi ve login/register işlemleri içerir.
+ * - Fazla state ve validation fonksiyonu sadeleştirilebilir.
+ */
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -66,7 +74,7 @@ const AuthScreen: React.FC<Props> = ({ navigation }) => {
       // Mobil cihazdan erişim için localhost yerine IP adresi kullan
       // Bilgisayarının IP adresini buraya yaz (örn: http://192.168.0.15:3000/api)
       const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.0.15:3000/api';
-      
+
       if (isLogin) {
         // Login
         const response = await fetch(`${API_URL}/auth/login`, {
@@ -81,7 +89,7 @@ const AuthScreen: React.FC<Props> = ({ navigation }) => {
         });
 
         const data = await response.json();
-        
+
         if (response.ok) {
           await login(data.token, data.user);
           navigation.replace('CaptureFlow');
@@ -104,7 +112,7 @@ const AuthScreen: React.FC<Props> = ({ navigation }) => {
         });
 
         const data = await response.json();
-        
+
         if (response.ok) {
           await login(data.token, data.user);
           navigation.replace('CaptureFlow');

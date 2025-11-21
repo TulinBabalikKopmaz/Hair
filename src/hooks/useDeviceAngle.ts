@@ -1,3 +1,20 @@
+/**
+ * useDeviceAngle
+ *
+ * Cihazın sensörlerinden (accelerometer, gyroscope) pitch, roll, yaw, zAxis gibi açı verilerini alır.
+ *
+ * - Telefonun yatıklık, diklik ve stabilite durumunu hesaplar.
+ * - orientationLabel ile kullanıcıya pozisyonu metin olarak sunar.
+ * - Diğer kural ve guidance fonksiyonlarıyla birlikte kullanılır.
+ *
+ * getPitchHint fonksiyonu sadece örnek yönlendirme için eklenmiştir, mantık sadeleştirilebilir.
+ */
+// Pitch değerine göre guidance/hint döndüren fonksiyon
+export function getPitchHint(pitch: number) {
+  if (pitch > 5) return 'Telefonu biraz sola yatırın';
+  if (pitch < -5) return 'Telefonu biraz sağa yatırın';
+  return null;
+}
 import { useEffect, useRef, useState } from 'react';
 import { Accelerometer, Gyroscope } from 'expo-sensors';
 

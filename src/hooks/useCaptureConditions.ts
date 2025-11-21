@@ -1,5 +1,14 @@
+/**
+ * useCaptureConditions
+ *
+ * Her adım için cihaz açısı, yüz pozisyonu, stabilite gibi kuralları kontrol eden merkezi hook.
+ *
+ * - Kural ve adım bazlı guidance/hint üretir.
+ * - Tüm adım koşullarını tek bir yerde toplar ve sadeleştirir.
+ * - Fazla tekrar eden veya karmaşık mantıklar sadeleştirilebilir.
+ */
 import { useMemo } from 'react';
-import { CaptureStep } from '../config/steps';
+import { CaptureRule } from '../config/captureRules';
 import { DeviceAngle } from './useDeviceAngle';
 
 export type FaceData = {
@@ -37,9 +46,9 @@ type ConditionCheckResult = {
  * Her pozisyon için koşul kontrol mekanizması
  */
 export const useCaptureConditions = (
-  step: CaptureStep,
+  step: CaptureRule,
   deviceAngle: DeviceAngle,
-  faceData: FaceData,
+  faceData: FaceData
 ): CaptureConditions => {
   const conditions = useMemo(() => {
     const hints: string[] = [];
@@ -134,30 +143,28 @@ export const useCaptureConditions = (
 /**
  * Telefon açısı kontrolü - Her pozisyon için özel
  */
-function checkDeviceAngle(
-  step: CaptureStep,
-  angle: DeviceAngle,
-): ConditionCheckResult {
+function checkDeviceAngle(step: CaptureRule, angle: DeviceAngle): ConditionCheckResult {
   const { pitch, roll, zAxis } = angle;
 
   switch (step.id) {
     case 'front': {
-      // Tam Yüz – Karşıdan: Basit telefon açısı kontrolleri
-      
-      // 1. Z ekseni kontrolü - Ekran yukarı/aşağı bakmamalı (daha esnek)
-      if (zAxis > 0.4) {
-        return { passed: false, hint: 'Telefonu yatay tut (ekran yukarı bakmamalı).' };
+      // Tam Yüz – Karşıdan: esnek telefon açısı kontrolleri
+      // Telefon yere paralel, yüz kameraya karşı - ancak katı kurallar yok
+
+      // 1. Z ekseni kontrolü - Ekran çok yukarı/aşağı bakmamalı (çok esnek)
+      if (zAxis > 0.25) {
+        return { passed: false, hint: 'Telefonu biraz öne eğ.' };
       }
-      if (zAxis < -0.2) {
-        return { passed: false, hint: 'Telefonu yatay tut (ekran aşağı bakmamalı).' };
+      if (zAxis < -0.08) {
+        return { passed: false, hint: 'Telefonu biraz yukarı kaldır.' };
       }
 
-      // 2. Pitch kontrolü - Sağa/sola yatık (daha esnek)
-      if (pitch > 10) {
-        return { passed: false, hint: 'Telefonu biraz sola doğru eğ (sağa yatık).' };
+      // 2. Pitch kontrolü - Sağa/sola yatık (çok esnek)
+      if (pitch > 8) {
+        return { passed: false, hint: 'Telefonu biraz sola doğru eğ.' };
       }
-      if (pitch < -10) {
-        return { passed: false, hint: 'Telefonu biraz sağa doğru eğ (sola yatık).' };
+      if (pitch < -8) {
+        return { passed: false, hint: 'Telefonu biraz sağa doğru eğ.' };
       }
 
       return { passed: true, hint: 'Telefon açısı tamam.' };
@@ -166,7 +173,7 @@ function checkDeviceAngle(
     case 'right45':
     case 'left45': {
       // 45° Sağa/Sola Bakış: Basit telefon açısı kontrolleri
-      
+
       // 1. Z ekseni kontrolü - Ekran yukarı/aşağı bakmamalı
       if (zAxis > 0.25) {
         return { passed: false, hint: 'Telefonu yatay tut (ekran yukarı bakmamalı).' };
@@ -253,10 +260,7 @@ function checkDeviceAngle(
 /**
  * Yüz yönü kontrolü - Front, right45, left45 için
  */
-function checkFaceOrientation(
-  step: CaptureStep,
-  faceData: FaceData,
-): ConditionCheckResult {
+function checkFaceOrientation(step: CaptureRule, faceData: FaceData): ConditionCheckResult {
   if (!faceData.detected) {
     return { passed: false, hint: 'Yüz tespit ediliyor...' };
   }
@@ -266,15 +270,15 @@ function checkFaceOrientation(
 
   switch (step.id) {
     case 'front': {
-      // Tam karşıdan: Yüz dik bakıyor (yaw açısı -60° ile +60° arasında - çok esnek)
-      // Front için yüz yönü kontrolü çok esnek - kullanıcı rahatça pozisyon alabilsin
-      if (mirroredYaw >= -60 && mirroredYaw <= 60) {
+      // Tam karşıdan: Yüz genel olarak öne bakıyor (yaw açısı ±75° - çok esnek)
+      // Front için yüz yönü kontrolü çok esnek - doğrudan tam karşıya bakmak zorunda değil
+      if (mirroredYaw >= -75 && mirroredYaw <= 75) {
         return { passed: true, hint: 'Yüz yönü tamam.' };
       }
-      if (mirroredYaw > 60) {
-        return { passed: false, hint: 'Yüzünü biraz sola çevir (dik bak).' };
+      if (mirroredYaw > 75) {
+        return { passed: false, hint: 'Yüzünü biraz daha öne çevir.' };
       } else {
-        return { passed: false, hint: 'Yüzünü biraz sağa çevir (dik bak).' };
+        return { passed: false, hint: 'Yüzünü biraz daha öne çevir.' };
       }
     }
 
@@ -316,23 +320,17 @@ function checkFacePitch(faceData: FaceData): ConditionCheckResult {
   }
 
   // Front-facing kamera için pitch açısı
-  // Yüz düz bakmalı: pitch -20° ile +20° arasında olmalı (esnek)
+  // Yüz düz bakmalı: pitch -30° ile +30° arasında olmalı (çok esnek)
   const facePitch = faceData.pitch || 0;
 
-  if (facePitch >= -20 && facePitch <= 20) {
+  if (facePitch >= -30 && facePitch <= 30) {
     return { passed: true, hint: 'Yüz yönü tamam.' };
   }
-  
-  if (facePitch > 20) {
-    if (facePitch > 35) {
-      return { passed: false, hint: 'Yüzünü aşağı çevir (çok yukarı bakıyorsun).' };
-    }
-    return { passed: false, hint: 'Yüzünü biraz aşağı çevir (düz bak).' };
+
+  if (facePitch > 30) {
+    return { passed: false, hint: 'Yüzünü biraz aşağı çevir.' };
   } else {
-    if (facePitch < -35) {
-      return { passed: false, hint: 'Yüzünü yukarı çevir (çok aşağı bakıyorsun).' };
-    }
-    return { passed: false, hint: 'Yüzünü biraz yukarı çevir (düz bak).' };
+    return { passed: false, hint: 'Yüzünü biraz yukarı çevir.' };
   }
 }
 
@@ -352,7 +350,7 @@ function checkFaceYawForFront(faceData: FaceData): ConditionCheckResult {
   if (absYaw <= 25) {
     return { passed: true, hint: 'Yüz yönü tamam.' };
   }
-  
+
   if (mirroredYaw > 25) {
     return { passed: false, hint: 'Yüzünü biraz sola çevir (dik bak).' };
   } else {

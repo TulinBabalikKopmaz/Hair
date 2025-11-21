@@ -1,456 +1,566 @@
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { Dimensions } from 'react-native';
+// scaledFaceBounds null kontrolü
+/**
+ * CameraOverlay
+ *
+ * Kamera önizlemesinin üstüne yüz kılavuzunu, ipuçlarını ve yardımcı görselleri çizer.
+ *
+ * - Yüzün doğru pozisyonda olup olmadığını gösterir.
+ * - Kullanıcıya adım kuralına göre yönlendirme ve countdown bilgisini sunar.
+ * - Yüz landmarklarını ve rehber kutusunu overlay olarak ekrana çizer.
+ *
+ * Props ile: countdown, hint, angleReady, faceDetected, faceBounds, deviceAngle, frameSize, mirrorHorizontal gibi değerler alır.
+ *
+ * Diğer componentlerle (FaceLandmarks, AngleIndicator) birlikte çalışır.
+ */
+import React from "react";
+import { StyleSheet, Text, View, Dimensions } from "react-native";
+import FaceLandmarks from "./FaceLandmarks";
 
 type Props = {
-  title: string;
-  description: string;
   countdown: number | null;
   hint: string;
   angleReady: boolean;
   faceDetected?: boolean;
-  faceBounds?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null;
+  faceBounds?: { x: number; y: number; width: number; height: number } | null;
   faceYaw?: number;
   facePitch?: number;
   onFaceInGuideChange?: (inGuide: boolean) => void;
+  onFaceAreaChange?: (areaPercent: number) => void;
+  deviceAngle?: {
+    pitch: number;
+    roll: number;
+    yaw: number;
+    zAxis: number;
+  };
+  lightness?: number;
+  frameSize?: { width: number; height: number };
+  children?: React.ReactNode;
+  mirrorHorizontal?: boolean;
+  landmarkOffsets?: any;
 };
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+
+const FACE_GUIDE_WIDTH = 240;
+const FACE_GUIDE_HEIGHT = 340;
+const FACE_GUIDE_RADIUS = 170;
+const FACE_GUIDE_GLOW_WIDTH = 270;
+const FACE_GUIDE_GLOW_HEIGHT = 370;
+const FACE_GUIDE_GLOW_RADIUS = 185;
+const FACE_GUIDE_INNER_RADIUS = 140;
+const BBOX_SCALE_X = 1.05;
+const BBOX_SCALE_Y = 1.40;
+const BBOX_VERTICAL_OFFSET = 5
+
+  ;
+
+const computeScaleAndOffset = (
+  overlaySize: { width: number; height: number },
+  frameSize: { width: number; height: number }
+) => {
+  if (overlaySize.width === 0 || overlaySize.height === 0) {
+    return { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 };
+  }
+
+  const overlayRatio = overlaySize.width / overlaySize.height;
+  const frameRatio = frameSize.width / frameSize.height;
+
+  let effectiveWidth = overlaySize.width;
+  let effectiveHeight = overlaySize.height;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  if (overlayRatio > frameRatio) {
+    effectiveWidth = overlaySize.height * frameRatio;
+    offsetX = (overlaySize.width - effectiveWidth) / 2;
+  } else if (overlayRatio < frameRatio) {
+    effectiveHeight = overlaySize.width / frameRatio;
+    offsetY = (overlaySize.height - effectiveHeight) / 2;
+  }
+
+  return {
+    scaleX: effectiveWidth / frameSize.width,
+    scaleY: effectiveHeight / frameSize.height,
+    offsetX,
+    offsetY,
+  };
+};
 
 const CameraOverlay: React.FC<Props> = ({
   countdown,
   hint,
   angleReady,
+
   faceDetected = false,
   faceBounds = null,
+
   faceYaw = 0,
   facePitch = 0,
-  onFaceInGuideChange,
-}) => {
-  const [overlaySize, setOverlaySize] = React.useState({ width: 0, height: 0 });
 
-  // Yüz yönü bilgilerini hesapla (açılarla birlikte)
+  onFaceInGuideChange,
+  onFaceAreaChange,
+
+  deviceAngle,
+  lightness = 0,
+
+  frameSize = { width: 640, height: 480 },
+
+  children,
+  mirrorHorizontal = false,
+  landmarkOffsets,
+}) => {
+  const [overlaySize, setOverlaySize] = React.useState({
+    width: 0,
+    height: 0,
+  });
+
+  const { scaleX, scaleY, offsetX, offsetY } = React.useMemo(
+    () => computeScaleAndOffset(overlaySize, frameSize),
+    [overlaySize, frameSize]
+  );
+
+  const fineTune = React.useMemo(
+    () => ({
+      fineTuneX: -37,
+      fineTuneY: -50,
+    }),
+    []
+  );
+
+  // 🔥 1) FACE BOUNDS → UI COORDINATES + OFFSET CORRECTION
+  // Yüzdeki bbox (dikdörtgen) kutusunu, ekranda oval overlay'e dönüştürür ve hizalar.
+  // Kamera tarafından tespit edilen yüz kutusunu, overlay'de oval ve doğru pozisyonda göstermek için kullanılır.
+  const scaledFaceBounds = React.useMemo(() => {
+    if (!faceBounds || overlaySize.width === 0 || overlaySize.height === 0)
+      return null;
+
+    const faceX = mirrorHorizontal
+      ? frameSize.width - (faceBounds.x + faceBounds.width)
+      : faceBounds.x;
+    const rawWidth = faceBounds.width * scaleX;
+    const rawHeight = faceBounds.height * scaleY;
+    const rawX = faceX * scaleX + offsetX + fineTune.fineTuneX;
+    const rawY = faceBounds.y * scaleY + offsetY + fineTune.fineTuneY;
+    const scaledWidth = rawWidth * BBOX_SCALE_X;
+    const scaledHeight = rawHeight * BBOX_SCALE_Y;
+
+    const centerX = rawX + rawWidth / 2;
+    const centerY = rawY + rawHeight / 2 + BBOX_VERTICAL_OFFSET;
+
+    return {
+      x: centerX - scaledWidth / 2,
+      y: centerY - scaledHeight / 2,
+      width: scaledWidth,
+      height: scaledHeight,
+    };
+  }, [faceBounds, scaleX, scaleY, offsetX, offsetY, fineTune, mirrorHorizontal]);
+
+
+
+  // 🔥 2) FACE DIRECTION (Yaw / Pitch)
   const faceDirectionInfo = React.useMemo(() => {
     if (!faceDetected) {
       return {
-        horizontal: 'Tespit ediliyor...',
-        vertical: '',
+        horizontal: "Tespit ediliyor...",
+        vertical: "",
         yawAngle: 0,
         pitchAngle: 0,
       };
     }
-    
-    // Yansıtılmış görüntü için yaw açısını tersine çevir
+
     const mirroredYaw = -(faceYaw || 0);
     const absYaw = Math.abs(mirroredYaw);
-    const pitch = facePitch || 0;
-    
-    // Yatay yön (sağa/sola/düz)
-    let horizontal = '';
-    let yawAngle = mirroredYaw;
-    if (absYaw <= 8) {
-      horizontal = 'Düz';
-      yawAngle = 0;
-    } else if (absYaw <= 20) {
-      horizontal = mirroredYaw > 0 ? 'Sağa' : 'Sola';
-      yawAngle = mirroredYaw;
-    } else if (absYaw <= 35) {
-      horizontal = mirroredYaw > 0 ? 'Sağa' : 'Sola';
-      yawAngle = mirroredYaw;
-    } else if (absYaw <= 50) {
-      horizontal = mirroredYaw > 0 ? 'Sağa' : 'Sola';
-      yawAngle = mirroredYaw;
-    } else {
-      horizontal = mirroredYaw > 0 ? 'Sağa' : 'Sola';
-      yawAngle = mirroredYaw;
+
+    let horizontal = absYaw <= 8 ? "Düz" : mirroredYaw > 0 ? "Sağa" : "Sola";
+
+    let vertical = "Düz";
+    let pitchAngle = 0;
+
+    if (facePitch > 5) {
+      vertical = "Yukarı";
+      pitchAngle = facePitch;
+    } else if (facePitch < -5) {
+      vertical = "Aşağı";
+      pitchAngle = Math.abs(facePitch);
     }
-    
-    // Dikey yön (yukarı/aşağı/düz)
-    let vertical = '';
-    let pitchAngle = pitch;
-    if (pitch > 20) {
-      if (pitch > 35) {
-        vertical = 'Yukarı';
-      } else {
-        vertical = 'Yukarı';
-      }
-      pitchAngle = pitch;
-    } else if (pitch < -20) {
-      if (pitch < -35) {
-        vertical = 'Aşağı';
-      } else {
-        vertical = 'Aşağı';
-      }
-      pitchAngle = pitch;
-    } else {
-      vertical = 'Düz';
-      pitchAngle = 0;
-    }
-    
+
     return {
       horizontal,
       vertical,
-      yawAngle: Math.round(yawAngle),
+      yawAngle: Math.round(absYaw),
       pitchAngle: Math.round(pitchAngle),
     };
   }, [faceDetected, faceYaw, facePitch]);
-  // Yüzün oval içinde olup olmadığını kontrol et (hem boyut hem konum)
-  // Ayrıca yüz kaplama yüzdesini hesapla (60-90% arası yeşil olacak)
-  const { isFaceInGuide, faceCoveragePercent, isInGreenRange } = React.useMemo(() => {
-    if (!faceDetected || !faceBounds) {
-      return { isFaceInGuide: false, faceCoveragePercent: 0, isInGreenRange: false };
+
+  // 🔥 3) FACE AREA / GUIDE CHECK + Landmarklar çemberin içinde mi?
+  const {
+    isFaceInGuide,
+    faceCoveragePercent,
+    isInGreenRange,
+    allLandmarksInCircle,
+    bboxInGuideCircle,
+  } = React.useMemo(() => {
+    if (!faceDetected || !faceBounds || !overlaySize.width || !overlaySize.height || !scaledFaceBounds) {
+      return { isFaceInGuide: false, faceCoveragePercent: 0, isInGreenRange: false, allLandmarksInCircle: false, bboxInGuideCircle: false };
     }
 
-    // Oval kılavuz boyutları (ekran koordinatlarında)
-    const guideWidth = 200;
-    const guideHeight = 260;
-    const overlayWidth = overlaySize.width || SCREEN_WIDTH;
-    const overlayHeight = overlaySize.height || SCREEN_HEIGHT;
+    // Klavuz çemberi (guide oval) merkez ve yarıçapı
+    const guideX = overlaySize.width / 2;
+    const guideY = overlaySize.height / 2;
+    const guideRadius = FACE_GUIDE_WIDTH / 2;
 
-    const faceWidth = faceBounds.width;
-    const faceHeight = faceBounds.height;
-    const faceCenterX = faceBounds.x + faceWidth / 2;
-    const faceCenterY = faceBounds.y + faceHeight / 2;
+    // Bbox çemberi merkez ve yarıçapı
+    const circleX = scaledFaceBounds.x + scaledFaceBounds.width / 2;
+    const circleY = scaledFaceBounds.y + scaledFaceBounds.height / 2;
+    const radius = scaledFaceBounds.width / 2;
 
-    const widthRatio = faceWidth / guideWidth;
-    const heightRatio = faceHeight / guideHeight;
+    // Bbox çemberi klavuzun içinde mi?
+    const bboxDist = Math.sqrt(Math.pow(circleX - guideX, 2) + Math.pow(circleY - guideY, 2));
+    const bboxInGuideCircle = bboxDist + radius <= guideRadius;
 
-    // Yüz boyutu kontrolü - yüz kılavuz çizgisini (daireyi) %30 ile %250 arasında kaplamalı (daha esnek)
-    // Alan bazlı kontrol: yüz alanı / kılavuz alanı
-    // Basit yaklaşım: widthRatio * heightRatio (yüz kılavuzun alanının yüzdesi)
-    const areaRatio = widthRatio * heightRatio;
-    const areaOk = areaRatio >= 0.30 && areaRatio <= 2.50; // Yüz kılavuzun alanının %30-250 arasında olmalı (daha esnek)
-    
-    const sizeOk = areaOk;
-
-    const guideCenterX = overlayWidth / 2;
-    const guideCenterY = overlayHeight / 2;
-
-    const dx = faceCenterX - guideCenterX;
-    const dy = faceCenterY - guideCenterY;
-
-    const a = guideWidth / 2;
-    const b = guideHeight / 2;
-    const positionScore = (dx * dx) / (a * a) + (dy * dy) / (b * b);
-    // Pozisyon kontrolü - yüzün kılavuz çizgileri içinde olup olmadığını kontrol et
-    // Yüzün merkezi kılavuz ovalinin içinde olmalı (elliptik kontrol)
-    // Daha esnek kontrol: position score 15.0'e kadar izin ver (yüz biraz uzakta olsa bile)
-    // Ayrıca X ve Y offset'lerini ayrı ayrı kontrol et - daha esnek tolerans
-    const xOffsetOk = Math.abs(dx) <= a * 3.5; // X ekseninde %350 tolerans (daha esnek)
-    const yOffsetOk = Math.abs(dy) <= b * 3.5; // Y ekseninde %350 tolerans (daha esnek)
-    // Position score 15.0'e kadar VEYA X ve Y offset'leri kabul edilebilir aralıktaysa OK
-    const positionOk = positionScore <= 15.0 || (xOffsetOk && yOffsetOk);
-
-    // Yüz kaplama yüzdesini hesapla
-    const faceCoveragePercent = areaRatio * 100;
-    // 60-90% arası yeşil olacak
-    const isInGreenRange = faceCoveragePercent >= 60 && faceCoveragePercent <= 90;
-
-    if (__DEV__ && faceDetected) {
-      const areaPercent = faceCoveragePercent.toFixed(1);
-      console.log('🔍 Face Guide:', {
-        overlay: `${overlayWidth.toFixed(0)}x${overlayHeight.toFixed(0)}`,
-        face: `${faceWidth.toFixed(0)}x${faceHeight.toFixed(0)}`,
-        ratios: `${widthRatio.toFixed(2)}, ${heightRatio.toFixed(2)}`,
-        areaRatio: `${areaPercent}%`,
-        centerOffset: `${dx.toFixed(0)}, ${dy.toFixed(0)}`,
-        sizeOk: sizeOk ? '✅' : '❌',
-        positionOk: positionOk ? '✅' : '❌',
-        score: positionScore.toFixed(2),
-        inGuide: (sizeOk && positionOk) ? '✅' : '❌',
-        greenRange: isInGreenRange ? '🟢' : '⚪',
-      });
+    // Landmark noktalarını kontrol et
+    let allIn = false;
+    if (children) {
+      const landmarkChild = React.Children.toArray(children).find(
+        (child): child is React.ReactElement<any> => React.isValidElement(child) && child.type === FaceLandmarks
+      );
+      if (landmarkChild && landmarkChild.props.landmarks) {
+        const landmarks = landmarkChild.props.landmarks as Record<string, { x: number; y: number }>;
+        allIn = Object.values(landmarks).every((lm) => {
+          if (!lm || typeof lm.x !== "number" || typeof lm.y !== "number") return false;
+          const likelyNormalized = lm.x <= 1 && lm.y <= 1;
+          const px = likelyNormalized ? lm.x * frameSize.width : lm.x;
+          const py = likelyNormalized ? lm.y * frameSize.height : lm.y;
+          // Mirror ve scale işlemleri
+          const xCoord = mirrorHorizontal ? frameSize.width - px : px;
+          const scaledX = xCoord * scaleX + offsetX + fineTune.fineTuneX;
+          const scaledY = py * scaleY + offsetY + fineTune.fineTuneY;
+          // Klavuz çemberine uzaklık
+          const dist = Math.sqrt(
+            Math.pow(scaledX - guideX, 2) + Math.pow(scaledY - guideY, 2)
+          );
+          return dist <= guideRadius;
+        });
+      }
     }
 
-    const result = sizeOk && positionOk;
-    
-    // CaptureFlowScreen'e bildir
-    if (onFaceInGuideChange) {
-      onFaceInGuideChange(result);
-    }
-    
-    return { isFaceInGuide: result, faceCoveragePercent, isInGreenRange };
-  }, [faceDetected, faceBounds, overlaySize, onFaceInGuideChange]);
+    // Alan oranı kontrolü
+    const GUIDE_W = 240;
+    const GUIDE_H = 340;
+    const area = (faceBounds.width / GUIDE_W) * (faceBounds.height / GUIDE_H);
+    const percent = area * 100;
+    const ok = percent >= 100 && percent <= 160;
+
+    // Sadece landmarklar ve bbox çemberi klavuzun içindeyse alan kontrolü yapılır
+    const isFaceInGuide = allIn && bboxInGuideCircle && ok;
+
+    return {
+      isFaceInGuide,
+      faceCoveragePercent: percent,
+      isInGreenRange: ok,
+      allLandmarksInCircle: allIn,
+      bboxInGuideCircle,
+    };
+  }, [faceDetected, faceBounds, overlaySize, scaledFaceBounds, frameSize, mirrorHorizontal, children, fineTune, scaleX, scaleY, offsetX, offsetY]);
+
+  // 🔥 4) SEND STATUS TO PARENT
+  React.useEffect(() => {
+    onFaceInGuideChange?.(isFaceInGuide);
+    onFaceAreaChange?.(faceCoveragePercent);
+  }, [isFaceInGuide, faceCoveragePercent]);
 
   return (
     <View
       style={styles.container}
-      pointerEvents="box-none"
-      onLayout={(event) => {
-        const { width, height } = event.nativeEvent.layout;
-        setOverlaySize({ width, height });
+      onLayout={(e) => {
+        setOverlaySize({
+          width: e.nativeEvent.layout.width,
+          height: e.nativeEvent.layout.height,
+        });
       }}
+      pointerEvents="none"
     >
-      {/* Kılavuz çizgileri - Yüz oval - HER ZAMAN GÖRÜNÜR */}
-      <View style={styles.guideContainer} pointerEvents="none">
-        {/* Dış glow efekti - sadece yüz oturduğunda ve yeşil aralıkta */}
-        {isFaceInGuide && isInGreenRange && (
+      {/* ================= OVALLER ================= */}
+      <View style={styles.guideContainer}>
+        {isInGreenRange && (
           <View style={[styles.faceGuideGlow, styles.faceGuideGlowActive]} />
         )}
-        
-        {/* Ana oval çerçeve - HER ZAMAN GÖRÜNÜR */}
-        {/* Yeşil: yüz kılavuzda VE %60-90 aralığında */}
-        <View style={[styles.faceGuide, isFaceInGuide && isInGreenRange && styles.faceGuideActive]}>
-          {/* İç gradient overlay - sadece yeşil aralıkta */}
-          {isFaceInGuide && isInGreenRange && <View style={styles.faceGuideInner} />}
-        </View>
-        
-        {/* Modern köşe işaretleri - HER ZAMAN GÖRÜNÜR */}
-        <View style={[styles.guideCorner, styles.guideTopLeft, isFaceInGuide && isInGreenRange && styles.guideCornerActive]}>
-          <View style={[styles.cornerDot, isFaceInGuide && isInGreenRange && styles.cornerDotActive]} />
-        </View>
-        <View style={[styles.guideCorner, styles.guideTopRight, isFaceInGuide && isInGreenRange && styles.guideCornerActive]}>
-          <View style={[styles.cornerDot, isFaceInGuide && isInGreenRange && styles.cornerDotActive]} />
-        </View>
-        <View style={[styles.guideCorner, styles.guideBottomLeft, isFaceInGuide && isInGreenRange && styles.guideCornerActive]}>
-          <View style={[styles.cornerDot, isFaceInGuide && isInGreenRange && styles.cornerDotActive]} />
-        </View>
-        <View style={[styles.guideCorner, styles.guideBottomRight, isFaceInGuide && isInGreenRange && styles.guideCornerActive]}>
-          <View style={[styles.cornerDot, isFaceInGuide && isInGreenRange && styles.cornerDotActive]} />
+
+        <View
+          style={[styles.faceGuide, isInGreenRange && styles.faceGuideActive]}
+        >
+          {isInGreenRange && <View style={styles.faceGuideInner} />}
         </View>
       </View>
 
-      {/* Sol üstte yüz yönü bilgisi */}
+      {/* ================= YÜZÜ ÇEVRELEYEN KIRMIZI ÇEMBER ================= */}
+      {faceDetected && scaledFaceBounds && (
+        <View
+          style={{
+            position: "absolute",
+            left: scaledFaceBounds.x,
+            top: scaledFaceBounds.y,
+            width: scaledFaceBounds.width,
+            height: scaledFaceBounds.height,
+            borderRadius: scaledFaceBounds.width / 2,
+            borderWidth: 2,
+            borderColor: "red",
+            backgroundColor: "transparent",
+          }}
+        />
+      )}
+
+      {/* ================= MERKEZ NOKTA ================= */}
+      {faceDetected && scaledFaceBounds && (
+        <View
+          style={[
+            styles.faceCenterDot,
+            {
+              left: scaledFaceBounds.x + scaledFaceBounds.width / 2,
+              top: scaledFaceBounds.y + scaledFaceBounds.height / 2,
+            },
+          ]}
+        />
+      )}
+
+      {/* ================= YÜZ YÖNÜ ================= */}
       <View style={styles.faceDirectionBox}>
-        <View style={styles.faceDirectionRow}>
-          <Text style={styles.faceDirectionLabel}>Yatay:</Text>
-          <Text style={styles.faceDirectionValue}>
-            {faceDirectionInfo.horizontal}
-            {faceDirectionInfo.yawAngle !== 0 && ` (${faceDirectionInfo.yawAngle}°)`}
+        <View style={styles.row}>
+          <Text style={styles.label}>Yatay:</Text>
+          <Text style={styles.value}>
+            {faceDirectionInfo.horizontal}{" "}
+            {faceDirectionInfo.yawAngle !== 0 &&
+              `(${faceDirectionInfo.yawAngle}°)`}
           </Text>
         </View>
-        <View style={[styles.faceDirectionRow, { marginBottom: 0 }]}>
-          <Text style={styles.faceDirectionLabel}>Dikey:</Text>
-          <Text style={styles.faceDirectionValue}>
-            {faceDirectionInfo.vertical}
-            {faceDirectionInfo.pitchAngle !== 0 && ` (${faceDirectionInfo.pitchAngle}°)`}
+
+        <View style={styles.row}>
+          <Text style={styles.label}>Dikey:</Text>
+          <Text style={styles.value}>
+            {faceDirectionInfo.vertical}{" "}
+            {faceDirectionInfo.pitchAngle !== 0 &&
+              `(${faceDirectionInfo.pitchAngle}°)`}
           </Text>
         </View>
       </View>
 
-      {countdown !== null ? (
-        <View style={styles.countdownWrapper}>
-          <View style={styles.countdownBackground} />
-          <Text style={styles.countdownText}>{countdown}</Text>
-          <Text style={styles.countdownLabel}>Fotoğraf çekiliyor...</Text>
+      {/* ================= CİHAZ AÇILARI ================= */}
+      {deviceAngle && (
+        <View style={styles.deviceAngleBox}>
+          <View style={styles.row}>
+            <Text style={styles.label}>Pitch:</Text>
+            <Text style={styles.value}>{deviceAngle.pitch.toFixed(1)}°</Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Roll:</Text>
+            <Text style={styles.value}>{deviceAngle.roll.toFixed(1)}°</Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Yaw:</Text>
+            <Text style={styles.value}>{deviceAngle.yaw.toFixed(1)}°</Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Z-axis:</Text>
+            <Text style={styles.value}>{deviceAngle.zAxis.toFixed(2)}</Text>
+          </View>
         </View>
-      ) : null}
+      )}
+
+      {/* ================= ALAN / YÜZ ETİKETİ ================= */}
+      {faceDetected && (
+        <View style={styles.faceCoverageBox}>
+          <View style={styles.row}>
+            <Text style={styles.label}>Alan:</Text>
+            <Text
+              style={[styles.value, isInGreenRange && styles.greenText]}
+            >
+              {faceCoveragePercent.toFixed(1)}%
+            </Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Yüz:</Text>
+            <Text style={[styles.value, isFaceInGuide && styles.greenText]}>
+              {isFaceInGuide ? "✓" : "✗"}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* ================= IŞIK ================= */}
+      <View style={styles.lightnessBox}>
+        <View style={styles.row}>
+          <Text style={styles.label}>Işık:</Text>
+          <Text style={styles.value}>{lightness.toFixed(1)}%</Text>
+        </View>
+      </View>
+
+      {/* ================= COUNTDOWN ================= */}
+      {countdown !== null && isInGreenRange && (
+        <View style={styles.countdownWrapper}>
+          <Text style={styles.countdownText}>{countdown}</Text>
+        </View>
+      )}
+
+      {/* ================= LANDMARKS (CHILDREN) ================= */}
+      {React.Children.map(children, (child) => {
+        if (React.isValidElement(child) && child.type === FaceLandmarks) {
+          return React.cloneElement(child as React.ReactElement<any>, {
+            overlaySize,
+            transformProps: {
+              scaleX,
+              scaleY,
+              offsetX,
+              offsetY,
+              ...fineTune,
+            },
+            mirrorHorizontal,
+            landmarkOffsets,
+          });
+        }
+        return child;
+      })}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    padding: 16,
-  },
+  container: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+
   guideContainer: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
+    bottom: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
+
   faceGuide: {
-    width: 200,
-    height: 260,
-    borderRadius: 100,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
-    borderStyle: 'solid',
-    shadowColor: 'rgba(255, 255, 255, 0.2)',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  faceGuideActive: {
-    borderColor: 'rgba(74,222,128,0.9)',
+    width: FACE_GUIDE_WIDTH,
+    height: FACE_GUIDE_HEIGHT,
+    borderRadius: FACE_GUIDE_RADIUS,
     borderWidth: 4,
-    shadowColor: 'rgba(74,222,128,0.5)',
-    shadowRadius: 12,
-    elevation: 12,
+    borderColor: "rgba(255,255,255,0.5)",
   },
+
+  faceGuideActive: {
+    borderColor: "rgba(74,222,128,1)",
+    borderWidth: 6,
+  },
+
   faceGuideGlow: {
-    position: 'absolute',
-    width: 220,
-    height: 280,
-    borderRadius: 110,
+    position: "absolute",
+    width: FACE_GUIDE_GLOW_WIDTH,
+    height: FACE_GUIDE_GLOW_HEIGHT,
+    borderRadius: FACE_GUIDE_GLOW_RADIUS,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: "rgba(255,255,255,0.2)",
   },
   faceGuideGlowActive: {
-    borderColor: 'rgba(74,222,128,0.3)',
-    shadowColor: 'rgba(74,222,128,0.4)',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 15,
-    elevation: 15,
+    borderColor: "rgba(74,222,128,0.3)",
   },
+
   faceGuideInner: {
-    position: 'absolute',
-    top: 2,
-    left: 2,
-    right: 2,
-    bottom: 2,
-    borderRadius: 98,
+    position: "absolute",
+    top: 4,
+    bottom: 4,
+    left: 4,
+    right: 4,
     borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.25)',
+    borderColor: "rgba(74,222,128,0.25)",
+    borderRadius: FACE_GUIDE_INNER_RADIUS,
   },
-  guideCorner: {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
+
+  faceBBoxRect: {
+    position: "absolute",
     borderWidth: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderColor: "red",
   },
-  guideTopLeft: {
-    top: -3,
-    left: -3,
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
-    borderTopLeftRadius: 20,
+
+  faceCenterDot: {
+    position: "absolute",
+    width: 10,
+    height: 10,
+    backgroundColor: "#fff",
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: "#000",
   },
-  guideTopRight: {
-    top: -3,
-    right: -3,
-    borderLeftWidth: 0,
-    borderBottomWidth: 0,
-    borderTopRightRadius: 20,
-  },
-  guideBottomLeft: {
-    bottom: -3,
-    left: -3,
-    borderRightWidth: 0,
-    borderTopWidth: 0,
-    borderBottomLeftRadius: 20,
-  },
-  guideBottomRight: {
-    bottom: -3,
-    right: -3,
-    borderLeftWidth: 0,
-    borderTopWidth: 0,
-    borderBottomRightRadius: 20,
-  },
-  guideCornerActive: {
-    borderColor: 'rgba(74,222,128,0.9)',
-    borderWidth: 4,
-    shadowColor: 'rgba(74,222,128,0.5)',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 6,
-    elevation: 6,
-  },
-  cornerDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-  },
-  cornerDotActive: {
-    backgroundColor: 'rgba(74,222,128,0.8)',
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    shadowColor: 'rgba(74,222,128,0.6)',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
+
   faceDirectionBox: {
-    position: 'absolute',
+    position: "absolute",
     top: 16,
     left: 16,
-    backgroundColor: 'rgba(15,23,42,0.85)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    padding: 10,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    minWidth: 140,
-    shadowColor: 'rgba(0,0,0,0.5)',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 4,
-    elevation: 4,
   },
-  faceDirectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+
+  row: {
+    flexDirection: "row",
     marginBottom: 4,
   },
-  faceDirectionLabel: {
+
+  label: {
     fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(226,232,240,0.7)',
+    color: "#ccc",
     marginRight: 6,
-    minWidth: 50,
   },
-  faceDirectionValue: {
+
+  value: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#e2e8f0',
+    fontWeight: "700",
+    color: "#fff",
   },
+
+  greenText: {
+    color: "#4ade80",
+    fontWeight: "900",
+  },
+
+  deviceAngleBox: {
+    position: "absolute",
+    left: 16,
+    bottom: 16,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    padding: 10,
+    borderRadius: 8,
+  },
+
+  faceCoverageBox: {
+    position: "absolute",
+    right: 16,
+    top: 16,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    padding: 10,
+    borderRadius: 8,
+  },
+
+  lightnessBox: {
+    position: "absolute",
+    right: 16,
+    bottom: 16,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    padding: 10,
+    borderRadius: 8,
+  },
+
   countdownWrapper: {
-    alignSelf: 'center',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    paddingHorizontal: 32,
-    paddingVertical: 20,
-    borderRadius: 20,
-    minWidth: 100,
-    minHeight: 100,
+    position: "absolute",
+    top: "40%",
+    left: "46%",
   },
-  countdownBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    shadowColor: 'rgba(255, 255, 255, 0.2)',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 10,
-    elevation: 10,
-  },
+
   countdownText: {
-    fontSize: 48,
-    fontWeight: '700',
-    color: 'rgba(255, 255, 255, 0.95)',
-    letterSpacing: 2,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
-    zIndex: 1,
-  },
-  countdownLabel: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 4,
-    zIndex: 1,
-    textAlign: 'center',
+    fontSize: 90,
+    fontWeight: "900",
+    color: "#e5e5e5",
   },
 });
 
 export default CameraOverlay;
-
