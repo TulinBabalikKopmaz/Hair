@@ -1,17 +1,4 @@
-// scaledFaceBounds null kontrolü
-/**
- * CameraOverlay
- *
- * Kamera önizlemesinin üstüne yüz kılavuzunu, ipuçlarını ve yardımcı görselleri çizer.
- *
- * - Yüzün doğru pozisyonda olup olmadığını gösterir.
- * - Kullanıcıya adım kuralına göre yönlendirme ve countdown bilgisini sunar.
- * - Yüz landmarklarını ve rehber kutusunu overlay olarak ekrana çizer.
- *
- * Props ile: countdown, hint, angleReady, faceDetected, faceBounds, deviceAngle, frameSize, mirrorHorizontal gibi değerler alır.
- *
- * Diğer componentlerle (FaceLandmarks, AngleIndicator) birlikte çalışır.
- */
+
 import React from "react";
 import { StyleSheet, Text, View, Dimensions } from "react-native";
 import FaceLandmarks from "./FaceLandmarks";
@@ -38,6 +25,9 @@ type Props = {
   children?: React.ReactNode;
   mirrorHorizontal?: boolean;
   landmarkOffsets?: any;
+  faceAreaMinPercent?: number;
+  faceAreaMaxPercent?: number;
+  guideActive?: boolean;
 };
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -105,6 +95,9 @@ const CameraOverlay: React.FC<Props> = ({
   children,
   mirrorHorizontal = false,
   landmarkOffsets,
+  faceAreaMinPercent = 100,
+  faceAreaMaxPercent = 160,
+  guideActive = false,
 }) => {
   const [overlaySize, setOverlaySize] = React.useState({
     width: 0,
@@ -246,7 +239,7 @@ const CameraOverlay: React.FC<Props> = ({
     const GUIDE_H = 340;
     const area = (faceBounds.width / GUIDE_W) * (faceBounds.height / GUIDE_H);
     const percent = area * 100;
-    const ok = percent >= 100 && percent <= 160;
+    const ok = percent >= faceAreaMinPercent && percent <= faceAreaMaxPercent;
 
     // Sadece landmarklar ve bbox çemberi klavuzun içindeyse alan kontrolü yapılır
     const isFaceInGuide = allIn && bboxInGuideCircle && ok;
@@ -279,14 +272,14 @@ const CameraOverlay: React.FC<Props> = ({
     >
       {/* ================= OVALLER ================= */}
       <View style={styles.guideContainer}>
-        {isInGreenRange && (
+        {guideActive && (
           <View style={[styles.faceGuideGlow, styles.faceGuideGlowActive]} />
         )}
 
         <View
-          style={[styles.faceGuide, isInGreenRange && styles.faceGuideActive]}
+          style={[styles.faceGuide, guideActive && styles.faceGuideActive]}
         >
-          {isInGreenRange && <View style={styles.faceGuideInner} />}
+          {guideActive && <View style={styles.faceGuideInner} />}
         </View>
       </View>
 

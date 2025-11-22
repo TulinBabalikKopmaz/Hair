@@ -25,12 +25,10 @@ const WelcomeScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <Image
-        source={{
-          uri: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=600&q=80',
-        }}
+        source={require('../assets/logo.png')}
         style={styles.hero}
       />
-      <Text style={styles.title}>SelfCapture</Text>
+      <Text style={styles.title}>Smile Hair Clinic</Text>
       <Text style={styles.subtitle}>
         5 adımda saç ekimi öncesi fotoğraflarını çekmene yardımcı oluyoruz.
       </Text>

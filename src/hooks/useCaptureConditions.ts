@@ -24,6 +24,9 @@ export type FaceData = {
     height: number;
   } | null;
   inGuide: boolean;
+  phoneHint: string;
+  faceHint: string;
+  guideHint: string;
 };
 
 
@@ -68,35 +71,12 @@ export function useCaptureConditions(
    */
   function checkDeviceAngle(step: StepRule, deviceAngle: DeviceAngle) {
     if (!step || !deviceAngle) {
-      return { allRulesMet: false, failedRules: [], currentHint: 'Kural veya açı eksik.' };
+      return { allRulesMet: false, currentHint: 'Kural veya açı eksik.' };
     }
-    const failedRules: string[] = [];
-    let deviceAngleOk = true;
-    if (deviceAngle.roll < step.deviceAngle.roll.min) {
-      failedRules.push(step.hints.rollLeft);
-      deviceAngleOk = false;
-    } else if (deviceAngle.roll > step.deviceAngle.roll.max) {
-      failedRules.push(step.hints.rollRight);
-      deviceAngleOk = false;
-    }
-    if (deviceAngle.pitch < step.deviceAngle.pitch.min) {
-      failedRules.push(step.hints.pitchDown);
-      deviceAngleOk = false;
-    } else if (deviceAngle.pitch > step.deviceAngle.pitch.max) {
-      failedRules.push(step.hints.pitchUp);
-      deviceAngleOk = false;
-    }
-    if (deviceAngle.zAxis < step.deviceAngle.zAxis.min) {
-      failedRules.push(step.hints.zAxisLow);
-      deviceAngleOk = false;
-    } else if (deviceAngle.zAxis > step.deviceAngle.zAxis.max) {
-      failedRules.push(step.hints.zAxisHigh);
-      deviceAngleOk = false;
-    }
+    const hint = step.getPhoneHintForAngle(deviceAngle);
     return {
-      allRulesMet: deviceAngleOk,
-      failedRules,
-      currentHint: failedRules[0] || 'Tüm kurallar sağlandı!',
+      allRulesMet: hint === 'Pozisyon uygun.',
+      currentHint: hint,
     };
   }
 }

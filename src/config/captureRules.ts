@@ -1,3 +1,4 @@
+import type { FaceData } from '../hooks/useCaptureConditions';
 /**
  * Her fotoğraf pozisyonu için özel kurallar
  * Tüm kurallar sağlandığında otomatik geri sayım başlar ve fotoğraf çekilir
@@ -7,19 +8,12 @@ export type StepRule = {
     id: string;
     name: string;
     description: string;
-    deviceAngle: {
-        roll: { min: number; max: number };
-        pitch: { min: number; max: number };
-        zAxis: { min: number; max: number };
-    };
-    hints: {
-        rollLeft: string;
-        rollRight: string;
-        pitchDown: string;
-        pitchUp: string;
-        zAxisLow: string;
-        zAxisHigh: string;
-    };
+    getPhoneHintForAngle: (angle: { roll: number; pitch: number; zAxis: number }) => string;
+    getFaceHintForAngle?: (face: FaceData) => string;
+    getFaceGuideStatus?: (face: FaceData) => string | undefined;
+    getGuideActiveStatus?: (face: FaceData) => boolean;
+    faceAreaMinPercent?: number;
+    faceAreaMaxPercent?: number;
 };
 
 export const CAPTURE_RULES: StepRule[] = [
@@ -27,90 +21,88 @@ export const CAPTURE_RULES: StepRule[] = [
         id: 'front',
         name: 'Tam Yüz – Karşıdan',
         description: 'Yüzünü kameranın tam ortasına yerleştir ve doğrudan karşıya bak.',
-        deviceAngle: {
-            roll: { min: 70, max: 95 },
-            pitch: { min: -5, max: 5 },
-            zAxis: { min: -0.08, max: 0.15 },
+        faceAreaMinPercent: 100,
+        faceAreaMaxPercent: 160,
+        getPhoneHintForAngle: (angle) => {
+            if (angle.roll < 70) return 'Telefonu biraz öne eğin.';
+            if (angle.roll > 95) return 'Telefonu biraz arkaya eğin.';
+            if (angle.pitch < -5) return 'Telefonu biraz sağa eğin.';
+            if (angle.pitch > 5) return 'Telefonu biraz sola eğin.';
+            if (angle.zAxis < -0.08) return 'Düz (Ekran Yukarı)';
+            if (angle.zAxis > 0.15) return 'Ters Ekran Aşağı';
+            return 'Telefon Dik Konumda.';
         },
-        hints: {
-            rollLeft: 'Telefonu biraz öne eğin.',
-            rollRight: 'Telefon biraz arkaya eğin.',
-            pitchDown: 'Telefonu biraz sağa eğin.',
-            pitchUp: 'Telefonu biraz sola eğin.',
-            zAxisLow: 'Düz (Ekran Yukarı)',
-            zAxisHigh: 'Ters Ekran Aşağı',
+        getFaceHintForAngle: (face) => {
+            if (face.yaw !== undefined) {
+                if (face.yaw < -10) return 'Yüzünüzü biraz sola çevirin';
+                if (face.yaw > 10) return 'Yüzünüzü biraz sağa çevirin';
+            }
+            if (face.pitch !== undefined) {
+                if (face.pitch < -10) return 'Biraz yukarı bakın';
+                if (face.pitch > 10) return 'Biraz aşağı bakın';
+            }
+            return 'Yüz tam karşıya bakıyor.';
+        },
+        getFaceGuideStatus: (face) => {
+            if (face.inGuide === true) return 'Yüz ve Saç klavuz çizgilerinde';
+            if (face.inGuide === false) return 'Yüz ve Saç klavuz çizgilerinde değil';
+            return undefined;
+        },
+        getGuideActiveStatus: (face) => {
+            // Yönlendirme kutusundaki metinlere göre kontrol
+            const phoneIsUpright = face?.phoneHint === 'Telefon Dik Konumda.';
+            const faceIsFront = face?.faceHint === 'Yüz tam karşıya bakıyor.';
+            const inGuide = face?.guideHint === 'Yüz ve Saç klavuz çizgilerinde';
+            return phoneIsUpright && faceIsFront && inGuide;
         },
     },
     {
         id: 'right45',
         name: '45° Sağa Bakış',
         description: 'Başını 45° sağa çevir ve yüzünü kılavuz çizgileri içine yerleştir.',
-        deviceAngle: {
-            roll: { min: -999, max: 999 },
-            pitch: { min: -999, max: 999 },
-            zAxis: { min: -999, max: 999 },
-        },
-        hints: {
-            rollLeft: 'Telefonu biraz sola yatırın',
-            rollRight: 'Telefonu biraz sağa yatırın',
-            pitchDown: 'Telefonu biraz öne eğin',
-            pitchUp: 'Telefonu biraz arkaya eğin',
-            zAxisLow: 'Telefonu biraz arkaya eğin',
-            zAxisHigh: 'Telefonu biraz öne eğin',
+        faceAreaMinPercent: 105,
+        faceAreaMaxPercent: 155,
+        getPhoneHintForAngle: (angle) => {
+            if (angle.roll < -10) return 'Telefonu biraz sola yatırın';
+            if (angle.roll > 10) return 'Telefonu biraz sağa yatırın';
+            if (angle.zAxis < -0.05 || angle.zAxis > 0.05) return 'Telefonu yere paralel tutun';
+            return 'Pozisyon uygun.';
         },
     },
     {
         id: 'left45',
         name: '45° Sola Bakış',
         description: 'Başını 45° sola çevir ve yüzünü kılavuz çizgileri içine yerleştir.',
-        deviceAngle: {
-            roll: { min: -999, max: 999 },
-            pitch: { min: -999, max: 999 },
-            zAxis: { min: -999, max: 999 },
-        },
-        hints: {
-            rollLeft: 'Telefonu biraz sola yatırın',
-            rollRight: 'Telefonu biraz sağa yatırın',
-            pitchDown: 'Telefonu biraz öne eğin',
-            pitchUp: 'Telefonu biraz arkaya eğin',
-            zAxisLow: 'Telefonu biraz arkaya eğin',
-            zAxisHigh: 'Telefonu biraz öne eğin',
+        faceAreaMinPercent: 105,
+        faceAreaMaxPercent: 155,
+        getPhoneHintForAngle: (angle) => {
+            if (angle.roll < -10) return 'Telefonu biraz sola yatırın';
+            if (angle.roll > 10) return 'Telefonu biraz sağa yatırın';
+            return 'Pozisyon uygun.';
         },
     },
     {
         id: 'vertex',
         name: 'Tepe Kısmı (Vertex)',
         description: 'Telefonu başının üzerine kaldır ve tepe kısmını kameranın ortasına yerleştir.',
-        deviceAngle: {
-            roll: { min: -999, max: 999 },
-            pitch: { min: -999, max: 999 },
-            zAxis: { min: -999, max: 999 },
-        },
-        hints: {
-            rollLeft: 'Telefonu biraz sola yatırın',
-            rollRight: 'Telefonu biraz sağa yatırın',
-            pitchDown: 'Telefonu biraz öne eğin',
-            pitchUp: 'Telefonu biraz arkaya eğin',
-            zAxisLow: 'Telefonu biraz arkaya eğin',
-            zAxisHigh: 'Telefonu biraz öne eğin',
+        faceAreaMinPercent: 110,
+        faceAreaMaxPercent: 150,
+        getPhoneHintForAngle: (angle) => {
+            if (angle.roll < -10) return 'Telefonu biraz sola yatırın';
+            if (angle.roll > 10) return 'Telefonu biraz sağa yatırın';
+            return 'Pozisyon uygun.';
         },
     },
     {
         id: 'donor',
         name: 'Arka Donör Bölgesi',
         description: 'Telefonu başının arkasına getir ve ense bölgesini kameranın ortasına yerleştir.',
-        deviceAngle: {
-            roll: { min: -999, max: 999 },
-            pitch: { min: -999, max: 999 },
-            zAxis: { min: -999, max: 999 },
-        },
-        hints: {
-            rollLeft: 'Telefonu biraz sola yatırın',
-            rollRight: 'Telefonu biraz sağa yatırın',
-            pitchDown: 'Telefonu biraz öne eğin',
-            pitchUp: 'Telefonu biraz arkaya eğin',
-            zAxisLow: 'Telefonu biraz arkaya eğin',
-            zAxisHigh: 'Telefonu biraz öne eğin',
+        faceAreaMinPercent: 115,
+        faceAreaMaxPercent: 145,
+        getPhoneHintForAngle: (angle) => {
+            if (angle.roll < -10) return 'Telefonu biraz sola yatırın';
+            if (angle.roll > 10) return 'Telefonu biraz sağa yatırın';
+            return 'Pozisyon uygun.';
         },
     },
 ];
@@ -122,33 +114,10 @@ export function getRuleById(id: string): StepRule | undefined {
 export function checkDeviceAngle(
     rule: StepRule,
     deviceAngle: { roll: number; pitch: number; zAxis: number }
-): { allRulesMet: boolean; failedRules: string[]; currentHint: string } {
-    const failedRules: string[] = [];
-    let deviceAngleOk = true;
-    if (deviceAngle.roll < rule.deviceAngle.roll.min) {
-        failedRules.push(rule.hints.rollLeft);
-        deviceAngleOk = false;
-    } else if (deviceAngle.roll > rule.deviceAngle.roll.max) {
-        failedRules.push(rule.hints.rollRight);
-        deviceAngleOk = false;
-    }
-    if (deviceAngle.pitch < rule.deviceAngle.pitch.min) {
-        failedRules.push(rule.hints.pitchDown);
-        deviceAngleOk = false;
-    } else if (deviceAngle.pitch > rule.deviceAngle.pitch.max) {
-        failedRules.push(rule.hints.pitchUp);
-        deviceAngleOk = false;
-    }
-    if (deviceAngle.zAxis < rule.deviceAngle.zAxis.min) {
-        failedRules.push(rule.hints.zAxisLow);
-        deviceAngleOk = false;
-    } else if (deviceAngle.zAxis > rule.deviceAngle.zAxis.max) {
-        failedRules.push(rule.hints.zAxisHigh);
-        deviceAngleOk = false;
-    }
+): { allRulesMet: boolean; currentHint: string } {
+    const hint = rule.getPhoneHintForAngle(deviceAngle);
     return {
-        allRulesMet: deviceAngleOk,
-        failedRules,
-        currentHint: failedRules[0] || 'Tüm kurallar sağlandı!',
+        allRulesMet: hint === 'Pozisyon uygun.',
+        currentHint: hint,
     };
 }

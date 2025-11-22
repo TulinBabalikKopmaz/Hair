@@ -1,13 +1,3 @@
-/**
- * CaptureFlowScreen
- *
- * Fotoğraf çekim adımlarının ana ekranı. Tüm kural, guidance, overlay ve kamera mantığı burada toplanır.
- *
- * - Adım bazlı kural kontrolü, sesli/yazılı yönlendirme, otomatik çekim, overlay ve rehber kutuları içerir.
- * - Dosya çok uzun ve karmaşık, mantıksal bloklar ayrı hook/component olarak bölünebilir.
- * - Fazla state, useEffect ve inline fonksiyonlar sadeleştirilmeli.
- */
-// Sesli yönlendirme için custom hook
 import { CAPTURE_RULES } from '../config/captureRules';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 // ...existing code...
@@ -110,12 +100,6 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
   });
   // ... diğer değişkenler
 
-  // ...existing code...
-  // ...existing code...
-  // ...existing code...
-  // ruleCheckResult tanımlandıktan SONRA sesli yönlendirme hook'u çağrılır
-  // ...existing code...
-
   // Face detection state
   const [faceYaw, setFaceYaw] = useState(0);
   const [facePitch, setFacePitch] = useState(0);
@@ -125,7 +109,20 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
   const [isFaceInGuide, setIsFaceInGuide] = useState(false);
   const [faceAreaPercent, setFaceAreaPercent] = useState(0);
 
-
+  // Yüz için guidance metni
+  const faceHint = currentStep.getFaceHintForAngle
+    ? currentStep.getFaceHintForAngle({
+      detected: faceDetected,
+      yaw: faceYaw,
+      pitch: facePitch,
+      roll: faceRoll,
+      bounds: faceBounds,
+      inGuide: isFaceInGuide,
+      phoneHint: currentStep.getPhoneHintForAngle(deviceAngle),
+      faceHint: '',
+      guideHint: '',
+    })
+    : '';
 
   // Yüz verilerini hazırla
   const faceData: FaceData = useMemo(
@@ -136,8 +133,23 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
       roll: faceRoll,
       bounds: faceBounds,
       inGuide: isFaceInGuide,
+      phoneHint: currentStep.getPhoneHintForAngle(deviceAngle),
+      faceHint,
+      guideHint: currentStep.getFaceGuideStatus
+        ? currentStep.getFaceGuideStatus({
+          detected: faceDetected,
+          yaw: faceYaw,
+          pitch: facePitch,
+          roll: faceRoll,
+          bounds: faceBounds,
+          inGuide: isFaceInGuide,
+          phoneHint: currentStep.getPhoneHintForAngle(deviceAngle),
+          faceHint,
+          guideHint: '',
+        }) || ''
+        : '',
     }),
-    [faceDetected, faceYaw, facePitch, faceRoll, faceBounds, isFaceInGuide],
+    [faceDetected, faceYaw, facePitch, faceRoll, faceBounds, isFaceInGuide, currentStep, deviceAngle, faceHint],
   );
 
   // Koşul kontrol mekanizması - yeni hook kullanılıyor
@@ -226,7 +238,6 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
     // Landmarkları kaydet
     if (face.landmarks) {
       setFaceLandmarks(face.landmarks);
-      console.log('👁️ Landmarks detected:', Object.keys(face.landmarks));
     } else {
       console.log('❌ No landmarks in face data');
     }
@@ -365,17 +376,10 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
     }
 
     // Kural kontrolü sonucu yoksa atla
+
     if (!ruleCheckResult) {
-      console.log('❌ No rule check result');
       return;
     }
-
-    // Debug: Kural durumunu logla
-    console.log(`🔍 Rule check for ${currentStep.id}:`, {
-      allRulesMet: ruleCheckResult.allRulesMet,
-      failedRules: ruleCheckResult.failedRules,
-      isCameraReady,
-    });
 
     // Tüm kurallar sağlanıyorsa otomatik sayıcı başlat
     if (ruleCheckResult.allRulesMet && isCameraReady) {
@@ -491,18 +495,35 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
           deviceAngle={deviceAngle}
           frameSize={frameDimensions}
           mirrorHorizontal={facingMode === 'front'}
-        // landmarkOffsets prop kaldırıldı, StepRule'da yok
+          faceAreaMinPercent={currentStep.faceAreaMinPercent}
+          faceAreaMaxPercent={currentStep.faceAreaMaxPercent}
+          guideActive={(() => {
+            const active = typeof currentStep.getGuideActiveStatus === 'function' ? currentStep.getGuideActiveStatus(faceData) : isFaceInGuide;
+            // GuideActive debug log removed
+            return active;
+          })()}
         >
           <FaceLandmarks
             landmarks={faceLandmarks}
             overlaySize={frameDimensions}
             frameSize={frameDimensions}
-          // landmarkOffsets prop kaldırıldı, StepRule'da yok
           />
         </CameraOverlay>
       </View>
 
-      {/* Kural kutusu kaldırıldı */}
+      {/* Yönlendirme kutusu kamera ile butonlar arasında */}
+      <View style={styles.guidanceBox}>
+        <Text style={styles.guidanceTitle}>Yönlendirme</Text>
+        <Text style={styles.guidanceLabel}>Telefon:</Text>
+        <Text style={styles.guidanceText}>{angleHint}</Text>
+        <Text style={styles.guidanceLabel}>Klavuz:</Text>
+        <Text style={styles.guidanceText}>
+          {currentStep.getFaceGuideStatus ? currentStep.getFaceGuideStatus(faceData) : ''}
+        </Text>
+        <Text style={styles.guidanceLabel}>Yüz:</Text>
+        <Text style={styles.guidanceText}>{faceHint}</Text>
+      </View>
+// ...existing code...
 
       {/* BUTONLAR KURALIN ALTINDA */}
       <View style={styles.controls}>
@@ -528,36 +549,79 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  guidanceLabel: {
+    color: '#4ade80',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'left',
+    marginBottom: 2,
+  },
+  guidanceDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+    marginVertical: 6,
+  },
+  guidanceBox: {
+    backgroundColor: 'rgba(30,41,59,0.95)',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 0,
+    marginTop: 4,
+    marginBottom: 8,
+    alignSelf: 'stretch',
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  guidanceTitle: {
+    color: '#4ade80',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
+    textAlign: 'left',
+  },
+  guidanceText: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: '400',
+    textAlign: 'left',
+  },
   container: {
     flex: 3,
     backgroundColor: '#030712',
-    padding: 16,
-    gap: 16,
-    paddingBottom: 24,
+    padding: 8,
+    gap: 8,
+    paddingBottom: 0,
   },
   progress: {
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 0,
+    marginTop: 0,
   },
   progressText: {
     color: '#94a3b8',
     fontSize: 14,
   },
   stepTitle: {
-    marginTop: 4,
+    marginTop: 0,
+    marginBottom: 0,
     fontSize: 18,
     fontWeight: '700',
     color: '#e2e8f0',
   },
   cameraShell: {
     flex: 1,
-    maxHeight: 450,
+    maxHeight: 440,
     borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(148,163,184,0.3)',
     backgroundColor: '#000',
-    marginTop: -20, // Kamera kutucuğunu azıcık yukarı kaydır
+    marginTop: -4,
+    marginBottom: 4,
   },
   camera: {
     flex: 1,
