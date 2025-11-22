@@ -10,16 +10,16 @@
 // Sesli yönlendirme için custom hook
 import { CAPTURE_RULES } from '../config/captureRules';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import StepRuleBox from '../components/StepRuleBox';
+// ...existing code...
 import {
   ActivityIndicator,
   Image,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Camera, useCameraDevice, useFrameProcessor } from 'react-native-vision-camera';
@@ -34,7 +34,7 @@ import CameraOverlay from '../components/CameraOverlay';
 import FaceLandmarks from '../components/FaceLandmarks';
 import { useDeviceAngle } from '../hooks/useDeviceAngle';
 import { useCaptureConditions, FaceData } from '../hooks/useCaptureConditions';
-import { getRuleById, checkRules } from '../config/captureRules';
+import { getRuleById, checkDeviceAngle } from '../config/captureRules';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CaptureFlow'>;
 
@@ -60,7 +60,7 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
   // CAPTURE_RULES importu dosyanın en üstünde zaten var, tekrarını kaldırıyoruz
   const { currentIndex, setCurrentIndex, photos, savePhoto, isPaused, pause, resume } = useCapture();
   const steps = CAPTURE_RULES;
-  const currentStep = steps[currentIndex];
+  const currentStep: import('../config/captureRules').StepRule = steps[currentIndex] || CAPTURE_RULES[0];
   const deviceAngle = useDeviceAngle();
   const { pitch, roll, yaw, zAxis, isStable, stabilityDuration } = deviceAngle;
   const [isCameraReady, setIsCameraReady] = useState(false);
@@ -144,27 +144,18 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
   // Adım kuralı
   const currentRule = useMemo(() => getRuleById(currentStep.id), [currentStep.id]);
   // Artık step objesi CaptureRule tipinde, tip uyumsuzluğu yok
-  const captureConditions = useCaptureConditions(currentStep, deviceAngle, faceData);
+  const captureConditions = useCaptureConditions(currentStep, deviceAngle);
 
   // Yeni kural kontrol sistemi
   const ruleCheckResult = useMemo(() => {
     if (!currentRule) return null;
-    return checkRules(
+    return checkDeviceAngle(
       currentRule,
       {
         roll: deviceAngle.roll,
         pitch: deviceAngle.pitch,
         zAxis: deviceAngle.zAxis,
-        isStable: deviceAngle.isStable,
-        stabilityDuration: deviceAngle.stabilityDuration,
-      },
-      {
-        detected: faceDetected,
-        yaw: faceYaw,
-        pitch: facePitch,
-        bounds: faceBounds,
-      },
-      faceAreaPercent,
+      }
     );
   }, [currentRule, deviceAngle, faceDetected, faceYaw, facePitch, faceBounds, faceAreaPercent]);
   const angleReady = ruleCheckResult?.allRulesMet || captureConditions.deviceAngleOk;
@@ -382,13 +373,8 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
     // Debug: Kural durumunu logla
     console.log(`🔍 Rule check for ${currentStep.id}:`, {
       allRulesMet: ruleCheckResult.allRulesMet,
-      deviceAngleOk: ruleCheckResult.deviceAngleOk,
-      faceDetectionOk: ruleCheckResult.faceDetectionOk,
-      faceAreaOk: ruleCheckResult.faceAreaOk,
-      faceOrientationOk: ruleCheckResult.faceOrientationOk,
-      stabilityOk: ruleCheckResult.stabilityOk,
-      isCameraReady,
       failedRules: ruleCheckResult.failedRules,
+      isCameraReady,
     });
 
     // Tüm kurallar sağlanıyorsa otomatik sayıcı başlat
@@ -505,21 +491,18 @@ const CaptureFlowScreen: React.FC<Props> = ({ navigation }) => {
           deviceAngle={deviceAngle}
           frameSize={frameDimensions}
           mirrorHorizontal={facingMode === 'front'}
-          landmarkOffsets={currentStep.landmarkOffsets}
+        // landmarkOffsets prop kaldırıldı, StepRule'da yok
         >
           <FaceLandmarks
             landmarks={faceLandmarks}
             overlaySize={frameDimensions}
             frameSize={frameDimensions}
-            landmarkOffsets={currentStep.landmarkOffsets}
+          // landmarkOffsets prop kaldırıldı, StepRule'da yok
           />
         </CameraOverlay>
       </View>
 
-      {/* KURAL KUTUSU KAMERANIN ALTINDA */}
-      <View style={{ marginTop: -20 }}>
-        <StepRuleBox rule={''} />
-      </View>
+      {/* Kural kutusu kaldırıldı */}
 
       {/* BUTONLAR KURALIN ALTINDA */}
       <View style={styles.controls}>

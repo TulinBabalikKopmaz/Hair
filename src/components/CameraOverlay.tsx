@@ -31,6 +31,7 @@ type Props = {
     roll: number;
     yaw: number;
     zAxis: number;
+    orientationLabel?: string;
   };
   lightness?: number;
   frameSize?: { width: number; height: number };
@@ -86,25 +87,21 @@ const computeScaleAndOffset = (
   };
 };
 
+// getRuleById ve getDeviceAngleHint kaldırıldı. Tüm guidance ve hintler artık üst componentten props ile gelmeli.
+
 const CameraOverlay: React.FC<Props> = ({
   countdown,
   hint,
   angleReady,
-
   faceDetected = false,
   faceBounds = null,
-
   faceYaw = 0,
   facePitch = 0,
-
   onFaceInGuideChange,
   onFaceAreaChange,
-
   deviceAngle,
   lightness = 0,
-
   frameSize = { width: 640, height: 480 },
-
   children,
   mirrorHorizontal = false,
   landmarkOffsets,
@@ -349,22 +346,29 @@ const CameraOverlay: React.FC<Props> = ({
         <View style={styles.deviceAngleBox}>
           <View style={styles.row}>
             <Text style={styles.label}>Pitch:</Text>
-            <Text style={styles.value}>{deviceAngle.pitch.toFixed(1)}°</Text>
+            <Text style={styles.value}>
+              {deviceAngle.pitch.toFixed(1)}°
+            </Text>
           </View>
-
           <View style={styles.row}>
             <Text style={styles.label}>Roll:</Text>
-            <Text style={styles.value}>{deviceAngle.roll.toFixed(1)}°</Text>
+            <Text style={styles.value}>
+              {deviceAngle.roll.toFixed(1)}°
+            </Text>
           </View>
-
           <View style={styles.row}>
             <Text style={styles.label}>Yaw:</Text>
             <Text style={styles.value}>{deviceAngle.yaw.toFixed(1)}°</Text>
           </View>
-
           <View style={styles.row}>
             <Text style={styles.label}>Z-axis:</Text>
-            <Text style={styles.value}>{deviceAngle.zAxis.toFixed(2)}</Text>
+            <Text style={styles.value}>
+              {deviceAngle.zAxis.toFixed(2)}
+            </Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Durum:</Text>
+            <Text style={styles.value}>{deviceAngle.orientationLabel}</Text>
           </View>
         </View>
       )}

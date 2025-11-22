@@ -1,6 +1,7 @@
 # SelfCapture - Saç Ekimi Fotoğraf Uygulaması
 
 React Native (Expo) ile geliştirilmiş saç ekimi öncesi fotoğraf çekme uygulaması.
+çalıştırma: npx expo run:android
 
 ## Özellikler
 

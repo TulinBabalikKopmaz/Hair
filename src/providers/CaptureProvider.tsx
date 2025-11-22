@@ -8,11 +8,11 @@ import React, {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { CAPTURE_RULES, CaptureRule } from '../config/captureRules';
+import { CAPTURE_RULES, StepRule } from '../config/captureRules';
 import { useAuth } from './AuthProvider';
 
 type CaptureContextValue = {
-  steps: CaptureRule[];
+  steps: StepRule[];
   currentIndex: number;
   setCurrentIndex: (index: number) => void;
   photos: Record<string, string | null>;
